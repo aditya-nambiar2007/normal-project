@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gesture Action Viewer</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #0f1115;
+      color: #f3f4f6;
+      padding: 1.5rem;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: #161920;
+      border: 1px solid #262a33;
+      border-radius: 18px;
+      overflow: hidden;
+      text-align: center;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
+    }
+    .img-wrap {
+      width: 100%;
+      height: 220px;
+      background: #f8fafc;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    #gesture-img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .content {
+      padding: 1.75rem 1.5rem 2rem;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #9ca3af;
+      margin-bottom: 0.6rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      background: #1e232d;
+    }
+    .badge.live {
+      color: #34d399;
+      background: rgba(52, 211, 153, 0.15);
+    }
+    .badge.offline {
+      color: #f87171;
+      background: rgba(248, 113, 113, 0.15);
+    }
+    #action {
+      font-size: 2rem;
+      font-weight: 700;
+      color: #38bdf8;
+      margin-bottom: 0.5rem;
+    }
+    #desc {
+      font-size: 0.95rem;
+      color: #cbd5e1;
+      line-height: 1.45;
+      min-height: 2.8em;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="img-wrap">
+      <img
+        id="gesture-img"
+        src="https://encrypted-tbn0.gstatic.com/licensed-image?q=tbn:ANd9GcT4v4JnjElS5s1ZiM9HiTgOhUGA3IgdlxeJ5JdcLcABiQo1Zd6sjxtPLwnNeSXd8JI-7QlaZLi5uI0cmL4"
+        alt="Sensor Still"
+      />
+    </div>
+    <div class="content">
+      <div class="badge" id="status">Connecting...</div>
+      <div id="action">Waiting...</div>
+      <p id="desc">Move or tilt the sensor to trigger a gesture.</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.8.4/dist/socket.io.min.js"></script>
+  <script>
+    const FALLBACK_SVG =
+      "data:image/svg+xml;utf8," +
+      encodeURIComponent(
+        `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140" viewBox="0 0 240 140">
+          <rect width="240" height="140" fill="#1f2430"/>
+          <circle cx="120" cy="70" r="28" fill="none" stroke="#38bdf8" stroke-width="4"/>
+          <text x="120" y="122" text-anchor="middle" fill="#cbd5e1" font-family="sans-serif" font-size="13">Gesture</text>
+        </svg>`
+      );
+
+    const GESTURES = {
+      "Sensor Still": {
+        text: "Device is resting flat and steady with no active motion.",
+        img: "https://encrypted-tbn0.gstatic.com/licensed-image?q=tbn:ANd9GcT4v4JnjElS5s1ZiM9HiTgOhUGA3IgdlxeJ5JdcLcABiQo1Zd6sjxtPLwnNeSXd8JI-7QlaZLi5uI0cmL4"
+      },
+      "Shaking": {
+        text: "Rapid multi-axis shake detected across X, Y, and Z.",
+        img: "https://thumbs.dreamstime.com/b/hand-wave-waving-hi-hello-gesture-flat-vector-icon-apps-websites-greeting-sign-symbol-give-five-152528841.jpg"
+      },
+      "Swipe Left": {
+        text: "Quick horizontal flick to the left.",
+        img: "https://cdn-icons-png.flaticon.com/512/10187/10187152.png"
+      },
+      "Swipe Right": {
+        text: "Quick horizontal flick to the right.",
+        img: "https://cdn-icons-png.flaticon.com/512/6852/6852496.png"
+      },
+      "Tilt Forward": {
+        text: "Pitching the front edge downward.",
+        img: "https://encrypted-tbn2.gstatic.com/licensed-image?q=tbn:ANd9GcThVrpo2JhDKq-QXcVN40sRak2ymJOKG8wuBUn0STe4rTMXd-MvGaMrjhHSCa5VGhFpIO2Vaa0RczKmJdE"
+      },
+      "Tilt Back": {
+        text: "Pitching the front edge upward toward you.",
+        img: "https://encrypted-tbn3.gstatic.com/licensed-image?q=tbn:ANd9GcTY04h8ROHc27SDyCb-c0bPZA4VjxR3W94HaxthMrBkQaP-USgagigBsiqexcUUQTrpgAdmOPqV53MJxqc"
+      },
+      "Twist Right": {
+        text: "Clockwise wrist rotation to the right.",
+        img: "https://i.pinimg.com/564x/54/b8/4e/54b84ed3cc276ab816b8c63b60d48fe9.jpg"
+      },
+      "Twist Left": {
+        text: "Counter-clockwise wrist rotation to the left.",
+        img: "https://i.pinimg.com/564x/54/b8/4e/54b84ed3cc276ab816b8c63b60d48fe9.jpg"
+      },
+      "Leaning Right": {
+        text: "Held tilted along the right side.",
+        img: "https://encrypted-tbn3.gstatic.com/licensed-image?q=tbn:ANd9GcTtApVSpKI2ntoW_PQcdRgV80rjJLI3h7Zeeef38MuSf9B36J4sgFBIrKvzobs7ZZn-2GUUNnKgVCI_t3M"
+      },
+      "Leaning Left": {
+        text: "Held tilted along the left side.",
+        img: "https://encrypted-tbn2.gstatic.com/licensed-image?q=tbn:ANd9GcSnrXfh7OdnENpAIC3y845EmAngVtqE3wOCzbbZDCLVJHQY9oFhITjnHF0M3A8AFIYVSEzeGTWYqjz_wfc"
+      },
+      "Pointing Up": {
+        text: "Sensor oriented vertically pointing upward.",
+        img: "https://encrypted-tbn2.gstatic.com/licensed-image?q=tbn:ANd9GcSXBe_GG_mZ9vxxlqnLtsehN11dF9wPGD1m63FA98cLQLXJenA3QhhrB1mkhqWa0RXb3MpDkFIsg4diTiE"
+      },
+      "Pointing Down": {
+        text: "Sensor oriented vertically pointing downward.",
+        img: "https://encrypted-tbn1.gstatic.com/licensed-image?q=tbn:ANd9GcTiInmHx5_FisU4wOrnGfubs30WviFZ7A2EZtW4o-0n5tim743_5zUx7kus4waJ2xV9TX1-PztUKcJJ-eE"
+      },
+      "Facing Up": {
+        text: "Sensor resting level with its face pointed up.",
+        img: "https://encrypted-tbn2.gstatic.com/licensed-image?q=tbn:ANd9GcSZyIwRXMiasLbj6yzxff-lxFUw9tVu05chFOhsq209V0owQYvPLxKhLwZVIyfUIKdnvFELbvQVMDcYUu4"
+      },
+      "Facing Down": {
+        text: "Sensor flipped upside down facing the floor.",
+        img: "https://encrypted-tbn3.gstatic.com/licensed-image?q=tbn:ANd9GcRLTD_I0N8e8-YP54pe_FSNMc0aVZWHlaDBVmRoQTT65HJO7xiGHVwKsygOVQRTUm7k8YxUNqYewd8uExw"
+      },
+      "Accel View": {
+        text: "LCD is displaying raw X, Y, Z acceleration (m/s²).",
+        img: "https://encrypted-tbn1.gstatic.com/licensed-image?q=tbn:ANd9GcTi3dVp3SdVnQWDzxQu7OBco1iQtvezagYxTd_py8bl65f-A1NA_pZ-JHSuzBNrEPqJ1pP4KyPv7JeDuwE"
+      },
+      "Gyro View": {
+        text: "LCD is displaying raw GX, GY, GZ angular velocity (deg/s).",
+        img: "https://encrypted-tbn0.gstatic.com/licensed-image?q=tbn:ANd9GcT18QCbVxUaSM898UjTiurtOVHiYJF7AgKRWs7KBCw9ex5bG9pPd9hbcnVf7DF6PqyQVFKfTUi8Mduw2co"
+      }
+    };
+
+    const actionEl = document.getElementById("action");
+    const descEl = document.getElementById("desc");
+    const imgEl = document.getElementById("gesture-img");
+    const statusEl = document.getElementById("status");
+
+    let currentAction = "";
+
+    function setStatus(text, type) {
+      statusEl.textContent = text;
+      statusEl.className = "badge " + (type || "");
+    }
+
+    imgEl.addEventListener("error", () => {
+      imgEl.src = FALLBACK_SVG;
+    });
+
+    function updateAction(rawAction) {
+      const action = (rawAction || "").trim();
+      if (!action || action === currentAction) return;
+      currentAction = action;
+
+      const info = GESTURES[action] || {
+        text: "Custom or unrecognized gesture event.",
+        img: FALLBACK_SVG
+      };
+
+      actionEl.textContent = action || "Waiting...";
+      descEl.textContent = info.text;
+      if (imgEl.src !== info.img) {
+        imgEl.src = info.img;
+        imgEl.alt = action;
+      }
+    }
+
+    let isSocketConnected = false;
+
+    // Initialize Socket.io (works when running node server locally)
+    try {
+      const socket = io({
+        reconnectionAttempts: 3,
+        timeout: 3000
+      });
+
+      socket.on("connect", () => {
+        isSocketConnected = true;
+        setStatus("Live (WebSocket)", "live");
+      });
+
+      socket.on("disconnect", () => {
+        isSocketConnected = false;
+        setStatus("Live (HTTP)", "live");
+      });
+
+      socket.on("connect_error", () => {
+        isSocketConnected = false;
+      });
+
+      socket.on("action", (data) => {
+        updateAction(data);
+      });
+    } catch (e) {
+      console.warn("Socket.io init failed, falling back to HTTP polling", e);
+    }
+
+    // HTTP Polling fallback (ensures 100% functionality on serverless Vercel)
+    async function pollAction() {
+      if (isSocketConnected) return;
+
+      try {
+        const res = await fetch("/action");
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.action) {
+            updateAction(data.action);
+          }
+          setStatus("Live", "live");
+        } else {
+          setStatus("Reconnecting...", "");
+        }
+      } catch (err) {
+        if (!isSocketConnected) {
+          setStatus("Connecting...", "");
+        }
+      }
+    }
+
+    // Poll periodically
+    setInterval(pollAction, 1000);
+    pollAction();
+  </script>
+</body>
+</html>
